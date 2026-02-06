@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 AI 그리드 봇 대시보드</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 10px;
+        }
+        
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+        }
+        
+        .stat-value.positive {
+            color: #4ade80;
+        }
+        
+        .stat-value.negative {
+            color: #f87171;
+        }
+        
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .chart-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .chart-title {
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .prediction-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .prediction-content {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .prediction-item {
+            text-align: center;
+            padding: 10px;
+        }
+        
+        .prediction-arrow {
+            font-size: 3em;
+        }
+        
+        .arrow-up {
+            color: #4ade80;
+        }
+        
+        .arrow-down {
+            color: #f87171;
+        }
+        
+        .events-list {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .event-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            border-left: 4px solid #4ade80;
+        }
+        
+        .event-item.flip {
+            border-left-color: #fbbf24;
+        }
+        
+        .event-item.grid-change {
+            border-left-color: #60a5fa;
+        }
+        
+        .event-time {
+            font-size: 0.8em;
+            opacity: 0.7;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .live-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #4ade80;
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: pulse 2s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 AI 그리드 봇 실시간 대시보드</h1>
+        
+        <!-- 예측 정보 -->
+        <div class="prediction-card">
+            <h2 class="chart-title">🔮 1분 후 가격 예측</h2>
+            <div class="prediction-content" id="prediction-content">
+                <div class="prediction-item">
+                    <div class="stat-label">현재 가격</div>
+                    <div class="stat-value" id="current-price">-</div>
+                </div>
+                <div class="prediction-item">
+                    <div class="prediction-arrow" id="prediction-arrow">→</div>
+                </div>
+                <div class="prediction-item">
+                    <div class="stat-label">예측 가격</div>
+                    <div class="stat-value" id="predicted-price">-</div>
+                </div>
+                <div class="prediction-item">
+                    <div class="stat-label">신뢰도</div>
+                    <div class="stat-value" id="confidence">-</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 통계 카드 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label"><span class="live-indicator"></span>총 수익</div>
+                <div class="stat-value positive" id="total-profit">$0.00</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">완료 거래</div>
+                <div class="stat-value" id="total-trades">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">그리드 히트</div>
+                <div class="stat-value" id="grid-hits">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">방향 전환</div>
+                <div class="stat-value" id="flips">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">회피 손실</div>
+                <div class="stat-value positive" id="avoided-loss">$0.00</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">활성 포지션</div>
+                <div class="stat-value" id="active-positions">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">💙 수익 포지션</div>
+                <div class="stat-value positive" id="profit-positions">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">❤️ 손실 포지션</div>
+                <div class="stat-value negative" id="loss-positions">0</div>
+            </div>
+        </div>
+        
+        <!-- 차트 -->
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3 class="chart-title">📈 가격 변동</h3>
+                <canvas id="priceChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3 class="chart-title">💰 누적 수익</h3>
+                <canvas id="profitChart"></canvas>
+            </div>
+        </div>
+        
+        <!-- 이벤트 로그 -->
+        <div class="events-list">
+            <h3 class="chart-title">📋 최근 이벤트</h3>
+            <div id="events-container"></div>
+        </div>
+    </div>
+    
+    <script>
+        // 차트 초기화
+        const priceCtx = document.getElementById('priceChart').getContext('2d');
+        const profitCtx = document.getElementById('profitChart').getContext('2d');
+        
+        const priceChart = new Chart(priceCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '가격',
+                    data: [],
+                    borderColor: '#4ade80',
+                    backgroundColor: 'rgba(74, 222, 128, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: { labels: { color: '#fff' } }
+                },
+                scales: {
+                    x: { ticks: { color: '#fff' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    y: { ticks: { color: '#fff' }, grid: { color: 'rgba(255,255,255,0.1)' } }
+                }
+            }
+        });
+        
+        const profitChart = new Chart(profitCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '누적 수익',
+                    data: [],
+                    borderColor: '#60a5fa',
+                    backgroundColor: 'rgba(96, 165, 250, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: { labels: { color: '#fff' } }
+                },
+                scales: {
+                    x: { ticks: { color: '#fff' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    y: { ticks: { color: '#fff' }, grid: { color: 'rgba(255,255,255,0.1)' } }
+                }
+            }
+        });
+        
+        // 데이터 업데이트
+        function updateDashboard() {
+            fetch('/api/data')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Error:', data.error);
+                        return;
+                    }
+                    
+                    // 통계 업데이트
+                    document.getElementById('total-profit').textContent = 
+                        '$' + data.stats.total_profit.toFixed(2);
+                    document.getElementById('total-trades').textContent = data.stats.total_trades;
+                    document.getElementById('grid-hits').textContent = data.stats.grid_hits;
+                    document.getElementById('flips').textContent = data.stats.flips;
+                    document.getElementById('avoided-loss').textContent = 
+                        '$' + data.stats.avoided_loss.toFixed(2);
+                    document.getElementById('active-positions').textContent = data.stats.active_positions;
+                    document.getElementById('profit-positions').textContent = data.stats.profit_positions;
+                    document.getElementById('loss-positions').textContent = data.stats.loss_positions;
+                    
+                    // 예측 정보 업데이트
+                    if (data.last_prediction) {
+                        const pred = data.last_prediction;
+                        document.getElementById('current-price').textContent = 
+                            '$' + pred.current_price.toFixed(2);
+                        document.getElementById('predicted-price').textContent = 
+                            '$' + pred.predicted_price.toFixed(2);
+                        document.getElementById('confidence').textContent = 
+                            (pred.confidence * 100).toFixed(1) + '%';
+                        
+                        const arrow = document.getElementById('prediction-arrow');
+                        if (pred.direction === 'up') {
+                            arrow.textContent = '↗';
+                            arrow.className = 'prediction-arrow arrow-up';
+                        } else {
+                            arrow.textContent = '↘';
+                            arrow.className = 'prediction-arrow arrow-down';
+                        }
+                    }
+                    
+                    // 가격 차트 업데이트
+                    if (data.prices && data.prices.length > 0) {
+                        const recentPrices = data.prices.slice(-50);
+                        priceChart.data.labels = recentPrices.map(p => 
+                            new Date(p.time).toLocaleTimeString('ko-KR'));
+                        priceChart.data.datasets[0].data = recentPrices.map(p => p.price);
+                        priceChart.update('none');
+                    }
+                    
+                    // 수익 차트 업데이트
+                    if (data.profits && data.profits.length > 0) {
+                        const recentProfits = data.profits.slice(-50);
+                        profitChart.data.labels = recentProfits.map(p => 
+                            new Date(p.time).toLocaleTimeString('ko-KR'));
+                        profitChart.data.datasets[0].data = recentProfits.map(p => p.profit);
+                        profitChart.update('none');
+                    }
+                    
+                    // 이벤트 로그 업데이트
+                    updateEvents(data);
+                })
+                .catch(error => console.error('Fetch error:', error));
+        }
+        
+        function updateEvents(data) {
+            const container = document.getElementById('events-container');
+            let eventsHtml = '';
+            
+            // 방향 전환 이벤트
+            if (data.flips && data.flips.length > 0) {
+                data.flips.slice(-10).reverse().forEach(flip => {
+                    eventsHtml += `
+                        <div class="event-item flip">
+                            <div class="event-time">${new Date(flip.time).toLocaleString('ko-KR')}</div>
+                            <div>🔄 방향 전환: ${flip.from} → ${flip.to}</div>
+                            <div>회피 손실: $${flip.avoided_loss.toFixed(4)}</div>
+                        </div>
+                    `;
+                });
+            }
+            
+            // 그리드 변경 이벤트
+            if (data.grid_changes && data.grid_changes.length > 0) {
+                data.grid_changes.slice(-10).reverse().forEach(change => {
+                    eventsHtml += `
+                        <div class="event-item grid-change">
+                            <div class="event-time">${new Date(change.time).toLocaleString('ko-KR')}</div>
+                            <div>📊 그리드 재조정</div>
+                            <div>새 중심: $${change.new_center.toFixed(2)}</div>
+                        </div>
+                    `;
+                });
+            }
+            
+            // 예측 이벤트
+            if (data.predictions && data.predictions.length > 0) {
+                data.predictions.slice(-5).reverse().forEach(pred => {
+                    const arrow = pred.direction === 'up' ? '↗' : '↘';
+                    const color = pred.direction === 'up' ? '#4ade80' : '#f87171';
+                    eventsHtml += `
+                        <div class="event-item">
+                            <div class="event-time">${new Date(pred.time).toLocaleString('ko-KR')}</div>
+                            <div>🔮 예측: <span style="color: ${color}">${arrow} ${pred.direction.toUpperCase()}</span></div>
+                            <div>$${pred.current.toFixed(2)} → $${pred.predicted.toFixed(2)} (신뢰도 ${(pred.confidence * 100).toFixed(1)}%)</div>
+                        </div>
+                    `;
+                });
+            }
+            
+            container.innerHTML = eventsHtml || '<div style="text-align: center; opacity: 0.5;">이벤트 없음</div>';
+        }
+        
+        // 1초마다 업데이트
+        updateDashboard();
+        setInterval(updateDashboard, 1000);
+    </script>
+</body>
+</html>
