@@ -61,7 +61,13 @@ class PricePredictor:
     
     def create_features(self, prices):
         """특징 생성 (기술적 지표)"""
-        df = pd.DataFrame(prices)
+        # prices가 리스트인 경우 DataFrame으로 변환
+        if isinstance(prices, list):
+            df = pd.DataFrame({'price': prices})
+        else:
+            df = pd.DataFrame(prices)
+            if 'price' not in df.columns:
+                df.columns = ['price']
         
         # 이동평균
         df['ma_5'] = df['price'].rolling(5).mean()
