@@ -203,6 +203,89 @@ class AIGridBot:
         
         return True
     
+    def clear_existing_positions_and_orders(self):
+        """시작 전 모든 기존 포지션과 대기 주문 청산/취소"""
+        # 기존 포지션 확인
+        positions = mt5.positions_get(symbol=self.config['symbol'], magic=self.config['magic_number'])
+        orders = mt5.orders_get(symbol=self.config['symbol'], magic=self.config['magic_number'])
+        
+        if not positions and not orders:
+            print("\n✓ 기존 포지션 및 주문 없음")
+            return True
+        
+        print(f"\n{'='*80}")
+        print(f"  ⚠️  기존 포지션 및 주문 발견!")
+        print(f"{'='*80}")
+        
+        if positions:
+            print(f"포지션: {len(positions)}개")
+            for pos in positions:
+                pos_type = "매수" if pos.type == mt5.ORDER_TYPE_BUY else "매도"
+                print(f"  - {pos_type} @ ${pos.price_open:,.2f} | Lot: {pos.volume}")
+        
+        if orders:
+            print(f"대기 주문: {len(orders)}개")
+        
+        print(f"{'='*80}\n")
+        
+        answer = input("모든 기존 포지션과 주문을 삭제하시겠습니까? (y/n): ")
+        
+        if answer.lower() != 'y':
+            print("❌ 사용자가 삭제를 취소했습니다.")
+            return False
+        
+        print(f"\n{'='*80}")
+        print(f"  🔄 기존 포지션 및 주문 정리 중...")
+        print(f"{'='*80}\n")
+        
+        # 기존 포지션 청산
+        if positions:
+            current_price = self.get_current_price()
+            if current_price:
+                closed = 0
+                for position in positions:
+                    close_type = mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+                    close_price = current_price['bid'] if close_type == mt5.ORDER_TYPE_SELL else current_price['ask']
+                    
+                    close_request = {
+                        "action": mt5.TRADE_ACTION_DEAL,
+                        "symbol": self.config['symbol'],
+                        "volume": position.volume,
+                        "type": close_type,
+                        "position": position.ticket,
+                        "price": close_price,
+                        "deviation": self.config['deviation'],
+                        "magic": self.config['magic_number'],
+                        "comment": "CLEAR_EXISTING",
+                        "type_time": mt5.ORDER_TIME_GTC,
+                        "type_filling": mt5.ORDER_FILLING_IOC,
+                    }
+                    
+                    result = mt5.order_send(close_request)
+                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        closed += 1
+                    time.sleep(0.05)
+                
+                print(f"✅ {closed}개 기존 포지션 청산 완료!")
+        
+        # 기존 대기 주문 취소
+        if orders:
+            canceled = 0
+            for order in orders:
+                remove_request = {
+                    "action": mt5.TRADE_ACTION_REMOVE,
+                    "order": order.ticket,
+                }
+                result = mt5.order_send(remove_request)
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    canceled += 1
+                time.sleep(0.05)
+            
+            print(f"✅ {canceled}개 기존 대기 주문 취소 완료!")
+        
+        print(f"\n{'='*80}\n")
+        return True
+    
     def get_symbol_info(self):
         """심볼 정보"""
         symbol_info = mt5.symbol_info(self.config['symbol'])
@@ -764,6 +847,23 @@ class AIGridBot:
         """대시보드 데이터 반환 (웹 서버용)"""
         analysis = self.analyze_positions()
         
+        # 현재 가격 추가
+        current_price = self.get_current_price()
+        if current_price:
+            # 가격 데이터가 비어있으면 초기화
+            if len(self.dashboard_data['prices']) == 0:
+                self.dashboard_data['prices'].append({
+                    'time': datetime.now().isoformat(),
+                    'price': current_price['ask']
+                })
+            
+            # 수익 데이터가 비어있으면 초기화
+            if len(self.dashboard_data['profits']) == 0:
+                self.dashboard_data['profits'].append({
+                    'time': datetime.now().isoformat(),
+                    'profit': self.stats['total_profit']
+                })
+        
         return {
             'stats': {
                 'total_profit': self.stats['total_profit'],
@@ -797,24 +897,36 @@ class AIGridBot:
         
         while self.running:
             if msvcrt.kbhit():
-                key = msvcrt.getch().upper()
-                
-                if key == b'H':
-                    self.manual_action = 'close_profit'
-                    self.running = False
-                    break
-                elif key == b'L':
-                    self.manual_action = 'close_loss'
-                    self.running = False
-                    break
-                elif key == b'Q':
-                    self.manual_action = 'close_all'
-                    self.running = False
-                    break
-                elif key == b'S':
-                    self.display_stats()
-                elif key == b'C':
-                    print("\n▶️ 계속 실행 중...\n")
+                try:
+                    key = msvcrt.getch()
+                    
+                    # bytes를 문자열로 변환
+                    if isinstance(key, bytes):
+                        key = key.decode('utf-8', errors='ignore').upper()
+                    else:
+                        key = str(key).upper()
+                    
+                    if key == 'H':
+                        print("\n💙 수익 포지션 청산 명령 수신...")
+                        self.manual_action = 'close_profit'
+                        self.running = False
+                        break
+                    elif key == 'L':
+                        print("\n❤️ 손실 포지션 청산 명령 수신...")
+                        self.manual_action = 'close_loss'
+                        self.running = False
+                        break
+                    elif key == 'Q':
+                        print("\n🔴 모든 포지션 청산 명령 수신...")
+                        self.manual_action = 'close_all'
+                        self.running = False
+                        break
+                    elif key == 'S':
+                        self.display_stats()
+                    elif key == 'C':
+                        print("\n▶️ 계속 실행 중...\n")
+                except Exception as e:
+                    pass  # 키 입력 에러 무시
             
             time.sleep(0.05)
     
@@ -924,12 +1036,17 @@ def main():
         mt5.shutdown()
         sys.exit(1)
     
+    # 기존 포지션/주문 정리
+    if not bot_instance.clear_existing_positions_and_orders():
+        mt5.shutdown()
+        sys.exit(1)
+    
     # 과거 데이터 수집 및 학습
     if not bot_instance.collect_historical_data():
         mt5.shutdown()
         sys.exit(1)
     
-    answer = input("\n시작하시겠습니까? (y/n): ")
+    answer = input("\n그리드를 시작하시겠습니까? (y/n): ")
     if answer.lower() != 'y':
         mt5.shutdown()
         sys.exit(0)
@@ -940,7 +1057,11 @@ def main():
     
     # 웹 서버 시작
     print("\n🌐 웹 대시보드 시작 중...")
-    from web_dashboard import start_web_server
+    from web_dashboard import start_web_server, set_bot_instance
+    
+    # 봇 인스턴스를 웹 서버에 전달
+    set_bot_instance(bot_instance)
+    
     web_thread = threading.Thread(target=start_web_server, daemon=True)
     web_thread.start()
     
