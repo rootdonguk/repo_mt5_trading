@@ -161,6 +161,8 @@ class AIGridBot:
             'start_time': datetime.now(),
             'predictions': [],
             'prediction_accuracy': 0.0,
+            'start_balance': 0.0,  # 시작 잔고
+            'start_equity': 0.0,   # 시작 증거금
         }
         self.center_price = None
         self.running = True
@@ -196,10 +198,14 @@ class AIGridBot:
             mt5.shutdown()
             return False
         
+        # 시작 잔고 저장
+        self.stats['start_balance'] = account_info.balance
+        self.stats['start_equity'] = account_info.equity
+        
         print("\n✓ MT5 연결 성공!")
         print(f"계좌: {account_info.login}")
-        print(f"잔고: ${account_info.balance:,.2f}")
-        print(f"증거금: ${account_info.equity:,.2f}")
+        print(f"시작 잔고: ${account_info.balance:,.2f}")
+        print(f"시작 증거금: ${account_info.equity:,.2f}")
         
         return True
     
@@ -811,19 +817,41 @@ class AIGridBot:
         positions = mt5.positions_get(symbol=self.config['symbol'], magic=self.config['magic_number'])
         analysis = self.analyze_positions()
         
+        # 현재 계좌 정보
+        account_info = mt5.account_info()
+        if account_info:
+            current_balance = account_info.balance
+            current_equity = account_info.equity
+            balance_change = current_balance - self.stats['start_balance']
+            equity_change = current_equity - self.stats['start_equity']
+        else:
+            current_balance = 0
+            current_equity = 0
+            balance_change = 0
+            equity_change = 0
+        
         print(f"\n{'='*80}")
         print(f"  📊 AI 그리드 봇 통계")
         print(f"{'='*80}")
         print(f"운영: {int(runtime)}시간 {int((runtime % 1) * 60)}분")
-        print(f"포지션: {len(positions) if positions else 0}개")
+        print(f"")
+        print(f"💰 계좌 현황:")
+        print(f"  시작 잔고: ${self.stats['start_balance']:,.2f}")
+        print(f"  현재 잔고: ${current_balance:,.2f}")
+        print(f"  실제 수익: ${balance_change:+,.2f}")
+        print(f"  현재 증거금: ${current_equity:,.2f} ({equity_change:+,.2f})")
+        print(f"")
+        print(f"📊 포지션: {len(positions) if positions else 0}개")
         print(f"  💙 수익: {len(analysis['profit_positions'])}개 (${analysis['total_profit']:+,.4f})")
         print(f"  ❤️ 손실: {len(analysis['loss_positions'])}개 (${analysis['total_loss']:+,.4f})")
-        print(f"히트: {self.stats['grid_hits']} | 완료: {self.stats['total_trades']}")
-        print(f"🔄 방향전환: {self.stats['flips']}회")
-        print(f"💰 누적 수익: ${self.stats['total_profit']:,.2f}")
-        print(f"✅ 회피 손실: ${self.stats['avoided_loss']:,.2f}")
+        print(f"")
+        print(f"📈 거래 통계:")
+        print(f"  히트: {self.stats['grid_hits']} | 완료: {self.stats['total_trades']}")
+        print(f"  🔄 방향전환: {self.stats['flips']}회")
+        print(f"  ✅ 회피 손실: ${self.stats['avoided_loss']:,.2f}")
         
         if self.last_prediction:
+            print(f"")
             print(f"🔮 최근 예측: {self.last_prediction['direction'].upper()} "
                   f"(신뢰도 {self.last_prediction['confidence']:.2%})")
         
@@ -960,8 +988,9 @@ class AIGridBot:
                     self.predict_and_adjust_grid()
                     last_prediction = current_time
                 
-                # 포지션 관리
-                self.check_and_manage_positions()
+                # 포지션 관리 (종료 명령이 없을 때만)
+                if self.running:
+                    self.check_and_manage_positions()
                 
                 # 대시보드 데이터 업데이트
                 self.update_dashboard_data()
@@ -976,6 +1005,14 @@ class AIGridBot:
                     positions = mt5.positions_get(symbol=self.config['symbol'], magic=self.config['magic_number'])
                     analysis = self.analyze_positions()
                     
+                    # 현재 잔고
+                    account_info = mt5.account_info()
+                    if account_info:
+                        balance_change = account_info.balance - self.stats['start_balance']
+                        balance_str = f"잔고: ${balance_change:+,.2f}"
+                    else:
+                        balance_str = ""
+                    
                     pred_str = ""
                     if self.last_prediction:
                         pred_str = f"🔮{self.last_prediction['direction'][0].upper()} "
@@ -984,11 +1021,13 @@ class AIGridBot:
                           f"{pred_str}BTC: ${current_price['ask']:,.2f} | "
                           f"💙{len(analysis['profit_positions'])} "
                           f"❤️{len(analysis['loss_positions'])} | "
-                          f"수익: ${self.stats['total_profit']:+,.2f}", end='\r')
+                          f"{balance_str}", end='\r')
                 
                 time.sleep(self.config['check_interval'])
             
-            # 수동 명령 처리
+            # 루프 종료 후 수동 명령 처리
+            print("\n\n종료 처리 중...")
+            
             if self.manual_action == 'close_profit':
                 self.close_profit_positions()
             elif self.manual_action == 'close_loss':
@@ -997,19 +1036,82 @@ class AIGridBot:
                 self.close_all_positions()
             
         except KeyboardInterrupt:
-            print("\n\nCtrl+C 감지")
+            print("\n\n⚠️ Ctrl+C 감지 - 모든 포지션 청산 중...")
+            
+            # 모든 포지션 청산
+            positions = mt5.positions_get(symbol=self.config['symbol'], magic=self.config['magic_number'])
+            if positions:
+                current_price = self.get_current_price()
+                if current_price:
+                    closed = 0
+                    for position in positions:
+                        close_type = mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+                        close_price = current_price['bid'] if close_type == mt5.ORDER_TYPE_SELL else current_price['ask']
+                        
+                        close_request = {
+                            "action": mt5.TRADE_ACTION_DEAL,
+                            "symbol": self.config['symbol'],
+                            "volume": position.volume,
+                            "type": close_type,
+                            "position": position.ticket,
+                            "price": close_price,
+                            "deviation": self.config['deviation'],
+                            "magic": self.config['magic_number'],
+                            "comment": "CTRL_C_EXIT",
+                            "type_time": mt5.ORDER_TIME_GTC,
+                            "type_filling": mt5.ORDER_FILLING_IOC,
+                        }
+                        
+                        result = mt5.order_send(close_request)
+                        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                            closed += 1
+                        time.sleep(0.05)
+                    
+                    print(f"✅ {closed}개 포지션 청산 완료!")
         
         finally:
+            # 최종 계좌 정보 조회
+            final_account = mt5.account_info()
+            
             # 최종 통계
             self.display_stats()
             
             # 대기 주문 정리
+            print("\n대기 주문 정리 중...")
             self.cancel_all_pending_orders()
             
-            print(f"\n최종 수익: ${self.stats['total_profit']:+,.2f}")
-            print(f"회피 손실: ${self.stats['avoided_loss']:.2f}")
+            # 실제 수익 계산
+            if final_account:
+                final_balance = final_account.balance
+                final_equity = final_account.equity
+                actual_profit = final_balance - self.stats['start_balance']
+                equity_change = final_equity - self.stats['start_equity']
+            else:
+                actual_profit = 0
+                equity_change = 0
+                final_balance = 0
+                final_equity = 0
+            
+            print(f"\n{'='*80}")
+            print(f"  🏁 봇 종료 - 최종 결산")
+            print(f"{'='*80}")
+            print(f"시작 잔고: ${self.stats['start_balance']:,.2f}")
+            print(f"최종 잔고: ${final_balance:,.2f}")
+            print(f"실제 수익: ${actual_profit:+,.2f}")
+            print(f"")
+            print(f"시작 증거금: ${self.stats['start_equity']:,.2f}")
+            print(f"최종 증거금: ${final_equity:,.2f}")
+            print(f"증거금 변화: ${equity_change:+,.2f}")
+            print(f"")
+            print(f"거래 통계:")
+            print(f"  총 거래: {self.stats['total_trades']}회")
+            print(f"  그리드 히트: {self.stats['grid_hits']}회")
+            print(f"  방향 전환: {self.stats['flips']}회")
+            print(f"  회피 손실: ${self.stats['avoided_loss']:,.2f}")
+            print(f"{'='*80}\n")
             
             mt5.shutdown()
+            print("✓ MT5 연결 종료")
 
 # 전역 봇 인스턴스 (웹 서버에서 접근)
 bot_instance = None
